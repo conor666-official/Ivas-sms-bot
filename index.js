@@ -1,54 +1,60 @@
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const { Telegraf } = require('telegraf');
+const axios = require('axios');
 const express = require('express');
 const crypto = require('crypto');
-
-// Use stealth plugin to avoid detection
-puppeteer.use(StealthPlugin());
 
 // Configuration
 const BOT_TOKEN = '8627509525:AAESth4wK45uHcaDK49oNgCwFNPSfd5vCf8';
 const CHAT_ID = '-1004297132684';
-const CHECK_INTERVAL = 7000; // 7 seconds
+const CHECK_INTERVAL = 7000;
 const CREATOR = '@K1XTREME';
 
 // State
 let lastMessages = new Set();
 let messageCount = 0;
 let startTime = Date.now();
-let browser = null;
-let page = null;
 
-// Logger
+// FRESH COOKIES FROM YOUR LAST REQUEST (June 2, 2026)
+let COOKIES = {
+    "XSRF-TOKEN": "eyJpdiI6IjhtNGtXaHZHZEp0dEtNL1NPZkEydFE9PSIsInZhbHVlIjoib2ZORWY1TWpwd1doQjNDT2VUeCtLY1FTSGZRdVlyS0pJZ0plN0tjTU5sZkhOckovNGc2M3ZzSXA3dHRSYzB0cnZmczdJNjZrUFZkbzBYeVRvUDk3VDI5UlkzdUJ5YzIrazNKaWhwc0ZXaWhnL1crOTU4SzJ5aGJ2WExtMk9jT08iLCJtYWMiOiI1N2UyNWVlNDRiZDc1MmZhNzE5OWIxMGY1ZjMwMzZkYzMxZWM5M2RjN2JmYzdkMGFkYTU0YTJlNGZmYTUzNmM1IiwidGFnIjoiIn0%3D",
+    "ivas_sms_session": "eyJpdiI6ImdpZ3gzV3NtWEhjdHh1SW4yWXQ5OUE9PSIsInZhbHVlIjoiQjBpaHRadFhwc3hrNUtwTnhCMEk2WEdJaWZ4OStsd0xNdmVRK2twUTZ2QzZ3YlZoQUhJeXF3eHMzTzZOVS85SE9XYWsrRDI5Ykx6UWRYWDB2ek1sZlZrZkg5eUU2MW95VmEvMExjaWxSejM1UldLMUgrcFQ3SDhObS9BbUxaL00iLCJtYWMiOiI0MTBhN2IxNjhmMjFkNzMxZDI1MmM1NjkwNmNmNDg4MjUxMWU4Y2NiNDU1NDdmMjdjNjM5NDYwYzBmNDNjMzQ1IiwidGFnIjoiIn0%3D",
+    "cf_clearance": "3pMgU8wgEe_uySzEL30GTApKpC2BIztcdYSJnkFI0HA-1780383599-1.2.1.1-jt8QxWQTpgOvhVnQ3ekkyOdI1PbUryUeL5CaquZCqzeu2.uK9V0E.a4yirXddfc1jvF6qXQz9eva1M.31ldu0sQtB25LLFUiZGZhMgQja7SpEoLt6QFtomIyChT9UGk3h1I_nWf1Q_8eTF8ct8CHY2I1g7Zl50FevNNUZ8qIljEubnfM3aZcxD5iqs.xzoLMsYqEx8M.SR9PQoVlqys57m2ac__9uNnfY8AfB83mL2B6mWC4aWqjB8W4sqmKcV75azWsUst.vofE0gq1PUACUnPC7b5YB05nGbKHbDbLh5PENExrWrM9vPjt.Le3p3yAdZ9IE4EbOM_PfbY1sDM0_cyq1bzCS9OP2wiJX2oh86NWbdKEfpCdG5DD.CNvEfnHAaBiCq.eblVMQHHQp870zCJrOZUVOotRrJaoUABvIRc"
+};
+
 const log = {
     info: (msg) => console.log(`[INFO] ${new Date().toISOString()} - ${msg}`),
     error: (msg) => console.log(`[ERROR] ${new Date().toISOString()} - ${msg}`),
-    success: (msg) => console.log(`[SUCCESS] ${new Date().toISOString()} - ${msg}`),
-    warn: (msg) => console.log(`[WARN] ${new Date().toISOString()} - ${msg}`)
+    success: (msg) => console.log(`[SUCCESS] ${new Date().toISOString()} - ${msg}`)
 };
 
-// Telegram Bot
-const bot = new Telegraf(BOT_TOKEN);
+const client = axios.create({
+    timeout: 30000,
+    headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'X-Requested-With': 'XMLHttpRequest'
+    }
+});
 
-// Helper functions
+function updateCookieHeader() {
+    const cookieString = Object.entries(COOKIES)
+        .filter(([_, v]) => v)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('; ');
+    if (cookieString) {
+        client.defaults.headers['Cookie'] = cookieString;
+        log.success('Cookies loaded');
+    }
+}
+updateCookieHeader();
+
 function escapeHtml(text) {
     if (!text) return '';
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function extractOTP(message) {
-    const patterns = [
-        /\b(\d{4,8})\b/,
-        /code[:\s]*(\d{4,8})/i,
-        /otp[:\s]*(\d{4,8})/i,
-        /verification[:\s]*(\d{4,8})/i
-    ];
+    const patterns = [/\b(\d{4,8})\b/, /code[:\s]*(\d{4,8})/i, /otp[:\s]*(\d{4,8})/i];
     for (const pattern of patterns) {
         const match = message.match(pattern);
         if (match) return match[1];
@@ -58,22 +64,16 @@ function extractOTP(message) {
 
 function maskNumber(number) {
     const clean = number.replace(/\D/g, '');
-    if (clean.length >= 10) {
-        return `+${clean.slice(0, 4)}****${clean.slice(-4)}`;
-    }
+    if (clean.length >= 10) return `+${clean.slice(0, 4)}****${clean.slice(-4)}`;
     return number;
 }
 
 function detectService(message, sender) {
     const combined = (message + ' ' + sender).toLowerCase();
-    
-    if (combined.includes('telegram') || combined.includes('t.me')) return { icon: '🔵', name: 'Telegram' };
-    if (combined.includes('whatsapp') || combined.includes('wa.me')) return { icon: '🟢', name: 'WhatsApp' };
+    if (combined.includes('telegram')) return { icon: '🔵', name: 'Telegram' };
+    if (combined.includes('whatsapp')) return { icon: '🟢', name: 'WhatsApp' };
     if (combined.includes('imo')) return { icon: '💬', name: 'IMO' };
-    if (combined.includes('facebook') || combined.includes('fb')) return { icon: '📘', name: 'Facebook' };
-    if (combined.includes('instagram') || combined.includes('ig')) return { icon: '📷', name: 'Instagram' };
-    if (combined.includes('tiktok')) return { icon: '🎵', name: 'TikTok' };
-    
+    if (combined.includes('facebook')) return { icon: '📘', name: 'Facebook' };
     return { icon: '📨', name: 'SMS' };
 }
 
@@ -84,9 +84,6 @@ function getCountryFlag(number) {
     if (clean.startsWith('7')) return '🇰🇿';
     if (clean.startsWith('225')) return '🇨🇮';
     if (clean.startsWith('237')) return '🇨🇲';
-    if (clean.startsWith('1')) return '🇺🇸';
-    if (clean.startsWith('44')) return '🇬🇧';
-    if (clean.startsWith('91')) return '🇮🇳';
     return '📱';
 }
 
@@ -97,26 +94,27 @@ function generateHash(sms) {
 
 function formatSMS(sms) {
     const flag = getCountryFlag(sms.number);
-    const { icon, name: serviceName } = detectService(sms.message, sms.sender);
-    const otpCode = extractOTP(sms.message);
-    const maskedNumber = maskNumber(sms.number);
-    const safeMessage = escapeHtml(sms.message.slice(0, 500));
+    const { icon, name } = detectService(sms.message, sms.sender);
+    const otp = extractOTP(sms.message);
+    const masked = maskNumber(sms.number);
+    const safeMsg = escapeHtml(sms.message.slice(0, 500));
     
-    return `<b>${flag} New ${serviceName} OTP!</b>\n\n` +
+    return `<b>${flag} New ${name} OTP!</b>\n\n` +
         `🕰 <b>Time:</b> ${sms.datetime}\n` +
-        `📞 <b>Number:</b> ${maskedNumber}\n` +
-        `${icon} <b>Service:</b> ${serviceName}\n` +
-        `🔑 <b>OTP:</b> <code>${otpCode}</code>\n\n` +
+        `📞 <b>Number:</b> ${masked}\n` +
+        `${icon} <b>Service:</b> ${name}\n` +
+        `🔑 <b>OTP:</b> <code>${otp}</code>\n\n` +
         `📩 <b>Message:</b>\n` +
-        `<code>${safeMessage}</code>\n\n` +
+        `<code>${safeMsg}</code>\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━━\n` +
         `<i>All credits goes to ${CREATOR} 🗿</i>`;
 }
 
-// Send Telegram message
 async function sendTelegramMessage(message) {
     try {
-        await bot.telegram.sendMessage(CHAT_ID, message, {
+        await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+            chat_id: CHAT_ID,
+            text: message,
             parse_mode: 'HTML',
             disable_web_page_preview: true
         });
@@ -128,226 +126,83 @@ async function sendTelegramMessage(message) {
     }
 }
 
-// Initialize browser
-async function initBrowser() {
-    log.info('Launching browser...');
-    
-    browser = await puppeteer.launch({
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--disable-gpu',
-            '--window-size=1920x1080',
-            '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--disable-blink-features=AutomationControlled',
-            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        ]
-    });
-    
-    page = await browser.newPage();
-    await page.setViewport({ width: 1920, height: 1080 });
-    
-    log.success('Browser launched');
-    return page;
-}
-
-// Login to IVA SMS portal (automated)
-async function autoLogin() {
-    log.info('Logging into IVA SMS portal...');
-    
+async function getToken() {
     try {
-        await page.goto('https://www.ivasms.com/portal', { 
-            waitUntil: 'networkidle2',
-            timeout: 60000
-        });
-        
-        await page.waitForTimeout(5000);
-        
-        // Check if already logged in
-        const currentUrl = page.url();
-        if (currentUrl.includes('/portal')) {
-            log.success('Already logged in');
-            const token = await page.evaluate(() => {
-                const meta = document.querySelector('meta[name="csrf-token"]');
-                return meta ? meta.getAttribute('content') : null;
-            });
-            if (token) return token;
+        const response = await client.get('https://www.ivasms.com/portal');
+        const match = response.data.match(/<meta name="csrf-token" content="([^"]+)"/);
+        if (match) {
+            log.success(`Token obtained: ${match[1].substring(0, 20)}...`);
+            return match[1];
         }
-        
-        // Check if on login page
-        if (currentUrl.includes('login')) {
-            log.warn('On login page - waiting for manual login (60 seconds)...');
-            log.info('Please login manually in your browser: https://ivasms.com');
-            
-            // Wait for navigation after manual login
-            await page.waitForNavigation({ timeout: 60000 });
-            log.success('Manual login detected');
-        }
-        
-        // Get CSRF token
-        const token = await page.evaluate(() => {
-            const meta = document.querySelector('meta[name="csrf-token"]');
-            return meta ? meta.getAttribute('content') : null;
-        });
-        
-        if (token) {
-            log.success(`Token obtained: ${token.substring(0, 20)}...`);
-            return token;
-        }
-        
-        throw new Error('Failed to get CSRF token');
-        
+        return null;
     } catch (error) {
-        log.error(`Login failed: ${error.message}`);
-        throw error;
+        if (error.response?.status === 403) log.error('Cloudflare blocking - cookies may be expired');
+        return null;
     }
 }
 
-// Fetch SMS using puppeteer
 async function fetchSMS(token) {
     const today = new Date().toISOString().slice(0, 10);
     
     try {
-        // Get ranges
-        const ranges = await page.evaluate(async (token, today) => {
-            const formData = new URLSearchParams();
-            formData.append('from', today);
-            formData.append('to', today);
-            formData.append('_token', token);
-            
-            const response = await fetch('/portal/sms/received/getsms', {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRF-TOKEN': token
-                }
-            });
-            
-            const html = await response.text();
-            const ranges = [];
-            const regex = /toggleRange\('([^']+)'/g;
-            let match;
-            while ((match = regex.exec(html)) !== null) {
-                ranges.push(match[1]);
-            }
-            return ranges;
-        }, token, today);
+        const rangesResp = await client.post('https://www.ivasms.com/portal/sms/received/getsms',
+            new URLSearchParams({ from: today, to: today, _token: token }).toString(),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-TOKEN': token } }
+        );
         
+        const ranges = [...rangesResp.data.matchAll(/toggleRange\('([^']+)'/g)].map(m => m[1]);
         if (!ranges.length) return [];
         
-        log.info(`Found ${ranges.length} ranges: ${ranges.join(', ')}`);
+        log.info(`Found ranges: ${ranges.join(', ')}`);
         
         const allSMS = [];
         
         for (const range of ranges) {
-            // Get numbers
-            const numbers = await page.evaluate(async (token, today, range) => {
-                const formData = new URLSearchParams();
-                formData.append('_token', token);
-                formData.append('start', today);
-                formData.append('end', today);
-                formData.append('range', range);
-                
-                const response = await fetch('/portal/sms/received/getsms/number', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-CSRF-TOKEN': token
-                    }
-                });
-                
-                const html = await response.text();
-                const numbers = [];
-                const regex = /toggleNum[^(]+\('(\d+)'/g;
-                let match;
-                while ((match = regex.exec(html)) !== null) {
-                    numbers.push(match[1]);
-                }
-                return numbers;
-            }, token, today, range);
+            const numbersResp = await client.post('https://www.ivasms.com/portal/sms/received/getsms/number',
+                new URLSearchParams({ _token: token, start: today, end: today, range }).toString(),
+                { headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-TOKEN': token } }
+            );
             
+            const numbers = [...numbersResp.data.matchAll(/toggleNum[^(]+\('(\d+)'/g)].map(m => m[1]);
             log.info(`Range ${range}: ${numbers.length} numbers`);
             
             for (const number of numbers) {
-                // Get SMS
-                const messages = await page.evaluate(async (token, today, number, range) => {
-                    const formData = new URLSearchParams();
-                    formData.append('_token', token);
-                    formData.append('start', today);
-                    formData.append('end', today);
-                    formData.append('Number', number);
-                    formData.append('Range', range);
+                const smsResp = await client.post('https://www.ivasms.com/portal/sms/received/getsms/number/sms',
+                    new URLSearchParams({ _token: token, start: today, end: today, Number: number, Range: range }).toString(),
+                    { headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-TOKEN': token } }
+                );
+                
+                const rows = smsResp.data.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
+                
+                for (const row of rows) {
+                    if (row.includes('<th')) continue;
                     
-                    const response = await fetch('/portal/sms/received/getsms/number/sms', {
-                        method: 'POST',
-                        body: formData,
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'X-Requested-With': 'XMLHttpRequest',
-                            'X-CSRF-TOKEN': token
-                        }
-                    });
+                    const senderMatch = row.match(/class="cli-tag"[^>]*>([^<]+)</);
+                    const sender = senderMatch ? senderMatch[1].trim() : 'SMS';
                     
-                    const html = await response.text();
-                    const messages = [];
-                    const rows = html.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
-                    
-                    for (const row of rows) {
-                        if (row.includes('<th')) continue;
-                        
-                        const senderMatch = row.match(/class="cli-tag"[^>]*>([^<]+)</);
-                        const sender = senderMatch ? senderMatch[1].trim() : 'SMS';
-                        
-                        const msgMatch = row.match(/class="msg-text"[^>]*>([\s\S]*?)<\/div>/i);
-                        let message = '';
-                        if (msgMatch) {
-                            message = msgMatch[1]
-                                .replace(/<[^>]+>/g, '')
-                                .replace(/&lt;/g, '<')
-                                .replace(/&gt;/g, '>')
-                                .replace(/&amp;/g, '&')
-                                .replace(/&#039;/g, "'")
-                                .trim();
-                        }
-                        
-                        const timeMatch = row.match(/class="time-cell"[^>]*>\s*([0-9:]+)\s*</);
-                        const time = timeMatch ? timeMatch[1].trim() : new Date().toLocaleTimeString();
-                        
-                        if (message && message.length > 2) {
-                            messages.push({
-                                datetime: `${today} ${time}`,
-                                number: number,
-                                sender: sender,
-                                message: message
-                            });
-                        }
+                    const msgMatch = row.match(/class="msg-text"[^>]*>([\s\S]*?)<\/div>/i);
+                    let message = '';
+                    if (msgMatch) {
+                        message = msgMatch[1].replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
                     }
                     
-                    return messages;
-                }, token, today, number, range);
-                
-                allSMS.push(...messages);
-                await new Promise(resolve => setTimeout(resolve, 500));
+                    const timeMatch = row.match(/class="time-cell"[^>]*>\s*([0-9:]+)\s*</);
+                    const time = timeMatch ? timeMatch[1].trim() : new Date().toLocaleTimeString();
+                    
+                    if (message && message.length > 2) {
+                        allSMS.push({ datetime: `${today} ${time}`, number, sender, message });
+                    }
+                }
+                await new Promise(r => setTimeout(r, 300));
             }
         }
-        
         return allSMS;
-        
     } catch (error) {
         log.error(`Fetch SMS failed: ${error.message}`);
         return [];
     }
 }
 
-// Process new SMS
 async function processNewSMS(smsList) {
     if (!smsList.length) return 0;
     
@@ -370,41 +225,28 @@ async function processNewSMS(smsList) {
     for (const sms of newMessages) {
         if (await sendTelegramMessage(formatSMS(sms))) {
             sent++;
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(r => setTimeout(r, 500));
         }
     }
-    
-    if (sent > 0) {
-        log.info(`📨 Sent ${sent} new messages`);
-    }
-    
+    if (sent > 0) log.info(`📨 Sent ${sent} new messages`);
     return sent;
 }
 
-// Express app for health checks
+// Express web interface
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
     res.send(`
-        <!DOCTYPE html>
         <html>
         <head><title>IVA SMS Monitor</title></head>
-        <body>
+        <body style="font-family: Arial; padding: 20px;">
             <h1>🤖 IVA SMS Monitor Bot</h1>
             <p>Status: <b style="color:green">RUNNING ✅</b></p>
             <p>Messages Sent: <b>${messageCount}</b></p>
             <p>Uptime: <b>${Math.floor((Date.now() - startTime) / 1000)} seconds</b></p>
-            <p>Check Interval: <b>7 seconds</b></p>
             <hr>
-            <h3>📝 Instructions for First Time Setup</h3>
-            <ol>
-                <li>Visit <a href="https://www.ivasms.com" target="_blank">https://www.ivasms.com</a> and login</li>
-                <li>Come back here - the bot will detect your login</li>
-                <li>Wait for "Login successful" message in Telegram</li>
-            </ol>
-            <hr>
-            <p><i>Bot is monitoring for OTP messages every 7 seconds</i></p>
+            <p>Bot is monitoring for OTP messages every 7 seconds.</p>
             <p>Creator: <b>${CREATOR}</b></p>
         </body>
         </html>
@@ -420,9 +262,7 @@ app.get('/health', (req, res) => {
     });
 });
 
-app.listen(PORT, () => {
-    log.info(`Web server running on port ${PORT}`);
-});
+app.listen(PORT, () => log.info(`Web server on port ${PORT}`));
 
 // Main function
 async function main() {
@@ -432,107 +272,50 @@ async function main() {
     console.log(`  ⏱️  Check Interval: 7 seconds`);
     console.log('═'.repeat(60) + '\n');
     
-    try {
-        await initBrowser();
-        
-        // First, try to auto-detect login
-        let token = await autoLogin();
-        
-        if (!token) {
-            log.warn('Could not auto-login. Please visit the bot URL and login manually.');
-            await sendTelegramMessage(`<b>⚠️ Manual Login Required</b>\n\n` +
-                `Please visit the bot's web interface and login to IVA SMS.\n` +
-                `The bot will detect your login automatically.\n\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `<i>All credits goes to ${CREATOR} 🗿</i>`);
+    log.info('Starting bot with pre-configured cookies...');
+    
+    const token = await getToken();
+    if (!token) {
+        log.error('Failed to get token with current cookies');
+        await sendTelegramMessage(`<b>❌ Authentication Failed</b>\n\nCookies may have expired. Please get fresh cookies from your browser.\n\n━━━━━━━━━━━━━━━━━━━━━━\n<i>All credits goes to ${CREATOR} 🗿</i>`);
+        return;
+    }
+    
+    await sendTelegramMessage(`<b>✅ IVA SMS Monitor Active</b>\n\n` +
+        `• Session: Active\n` +
+        `• Check Interval: 7s\n` +
+        `• Monitoring for new messages...\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `<i>All credits goes to ${CREATOR} 🗿</i>`);
+    
+    log.success('Bot started successfully!');
+    
+    let lastStats = Date.now();
+    
+    while (true) {
+        try {
+            const smsList = await fetchSMS(token);
+            await processNewSMS(smsList);
             
-            // Wait for manual login
-            while (!token) {
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                await page.reload();
-                token = await page.evaluate(() => {
-                    const meta = document.querySelector('meta[name="csrf-token"]');
-                    return meta ? meta.getAttribute('content') : null;
-                });
-                if (token) log.success('Manual login detected!');
+            if (Date.now() - lastStats > 600000) {
+                const uptime = Math.floor((Date.now() - startTime) / 1000);
+                const hours = Math.floor(uptime / 3600);
+                const minutes = Math.floor((uptime % 3600) / 60);
+                await sendTelegramMessage(`<b>📊 Bot Statistics</b>\n\n` +
+                    `• Uptime: ${hours}h ${minutes}m\n` +
+                    `• Messages Sent: ${messageCount}\n` +
+                    `• Status: ✅ Active\n\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `<i>All credits goes to ${CREATOR} 🗿</i>`);
+                lastStats = Date.now();
             }
+            
+            await new Promise(r => setTimeout(r, CHECK_INTERVAL));
+        } catch (error) {
+            log.error(`Loop error: ${error.message}`);
+            await new Promise(r => setTimeout(r, CHECK_INTERVAL));
         }
-        
-        await sendTelegramMessage(`<b>✅ IVA SMS Monitor Active</b>\n\n` +
-            `• Session: Active\n` +
-            `• Check Interval: 7s\n` +
-            `• Browser: Puppeteer (No Cloudflare issues!)\n` +
-            `• Monitoring for new messages...\n\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `<i>All credits goes to ${CREATOR} 🗿</i>`);
-        
-        log.success('Bot started successfully!');
-        
-        let lastStats = Date.now();
-        
-        while (true) {
-            try {
-                // Refresh token occasionally
-                const freshToken = await page.evaluate(() => {
-                    const meta = document.querySelector('meta[name="csrf-token"]');
-                    return meta ? meta.getAttribute('content') : null;
-                });
-                if (freshToken) token = freshToken;
-                
-                const smsList = await fetchSMS(token);
-                await processNewSMS(smsList);
-                
-                if (Date.now() - lastStats > 600000) {
-                    const uptime = Math.floor((Date.now() - startTime) / 1000);
-                    const hours = Math.floor(uptime / 3600);
-                    const minutes = Math.floor((uptime % 3600) / 60);
-                    await sendTelegramMessage(`<b>📊 Bot Statistics</b>\n\n` +
-                        `• Uptime: ${hours}h ${minutes}m\n` +
-                        `• Messages Sent: ${messageCount}\n` +
-                        `• Check Interval: 7s\n` +
-                        `• Status: ✅ Active\n\n` +
-                        `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                        `<i>All credits goes to ${CREATOR} 🗿</i>`);
-                    lastStats = Date.now();
-                }
-                
-                await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL));
-                
-            } catch (error) {
-                log.error(`Loop error: ${error.message}`);
-                
-                // Try to recover
-                try {
-                    await page.reload({ waitUntil: 'networkidle2' });
-                    await page.waitForTimeout(3000);
-                    log.success('Page reloaded');
-                } catch (recoverError) {
-                    log.error('Failed to recover, restarting browser...');
-                    await browser.close();
-                    await initBrowser();
-                    token = await autoLogin();
-                }
-                
-                await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL));
-            }
-        }
-        
-    } catch (error) {
-        log.error(`Fatal error: ${error.message}`);
-        await sendTelegramMessage(`<b>❌ Bot Failed</b>\n\n` +
-            `Error: ${error.message}\n\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `<i>All credits goes to ${CREATOR} 🗿</i>`);
-        process.exit(1);
     }
 }
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('\n⚠️ Shutting down...');
-    if (browser) await browser.close();
-    process.exit(0);
-});
-
-// Start
 main().catch(console.error);
